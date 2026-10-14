@@ -246,18 +246,19 @@ impl Backend for NES {
         (256, 240)
     }
 
-    fn set_input(&mut self, input: InputEvent) {
-        match input {
-            InputEvent::Digital(idx, pressed) => {
-                let nes_button = NES_INPUTS[idx].id;
-                // Handle input
-                let mut controller_state = 0x00;
-                if pressed {
-                    controller_state |= nes_button
-                };
-                self.bus.borrow_mut().update_controller(0, controller_state as u8);
-            },
+    fn set_inputs(&mut self, inputs: Vec<InputEvent>) {
+        let mut controller_state = 0x00;
+        for input in inputs {
+            match input {
+                InputEvent::Digital(idx, pressed) => {
+                    let nes_button = NES_INPUTS[idx].id;
+                    if pressed {
+                        controller_state |= nes_button
+                    };
+                },
+            }
         }
+        self.bus.borrow_mut().update_controller(0, controller_state as u8);
     }
 
     fn flush_audio_samples(&mut self, out: &mut Vec<f32>) {

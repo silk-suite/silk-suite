@@ -212,7 +212,7 @@ impl eframe::App for SilkSuite {
                     InputKind::Digital => {
                         let key = Key::from_name(input.name).expect("Invalid key mapped to input!");
 
-                        if ctx.input(|i| i.key_pressed(key)) {
+                        if ctx.input(|i| i.key_down(key)) {
                             events.push(InputEvent::Digital(idx, true));
                         }
 
@@ -225,9 +225,7 @@ impl eframe::App for SilkSuite {
                 }
             }
 
-            for event in events {
-                self.backend.set_input(event);
-            }
+            self.backend.set_inputs(events);
         }
     }
 }

@@ -719,11 +719,13 @@ impl Backend for CHIP8 {
         if self.hires_mode { (128, 64) } else { (64, 32) }
     }
 
-    fn set_input(&mut self, input: InputEvent) {
-        match input {
-            InputEvent::Digital(idx, pressed) => {
-                let chip8_key = CHIP8_INPUTS[idx].id;
-                self.input[chip8_key] = pressed;
+    fn set_inputs(&mut self, inputs: Vec<InputEvent>) {
+        for input in inputs {
+            match input {
+                InputEvent::Digital(idx, pressed) => {
+                    let chip8_key = CHIP8_INPUTS[idx].id;
+                    self.input[chip8_key] = pressed;
+                }
             }
         }
     }

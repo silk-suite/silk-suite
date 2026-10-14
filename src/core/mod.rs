@@ -33,7 +33,7 @@ pub trait Backend {
     fn frame_tick(&mut self);
     fn framebuffer_rgba(&mut self) -> &[u8];
     fn framebuffer_size(&self) -> (usize, usize);
-    fn set_input(&mut self, input: InputEvent);
+    fn set_inputs(&mut self, input: Vec<InputEvent>);
     fn flush_audio_samples(&mut self, out: &mut Vec<f32>);
     /// Returns the list of inputs this backend supports.
     fn input_map(&self) -> &[InputDescriptor];
