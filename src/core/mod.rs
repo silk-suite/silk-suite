@@ -31,7 +31,7 @@ pub trait Backend {
     fn load_rom(&mut self, data: &[u8]);
     fn reset_rom(&mut self);
     fn frame_tick(&mut self);
-    fn framebuffer_rgba(&mut self) -> &[u8];
+    fn framebuffer_rgb(&mut self) -> Vec<u8>;
     fn framebuffer_size(&self) -> (usize, usize);
     fn set_inputs(&mut self, input: Vec<InputEvent>);
     fn flush_audio_samples(&mut self, out: &mut Vec<f32>);

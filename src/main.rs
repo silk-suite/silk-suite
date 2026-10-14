@@ -57,7 +57,7 @@ impl eframe::App for SilkSuite {
             let (w, h) = self.backend.framebuffer_size();
 
             let image =
-                egui::ColorImage::from_rgb([w, h], self.backend.framebuffer_rgba());
+                egui::ColorImage::from_rgb([w, h], &self.backend.framebuffer_rgb());
 
             let tex = self.screen_texture.get_or_insert_with(|| {
                 ui.ctx()

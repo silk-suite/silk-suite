@@ -43,7 +43,6 @@ const NES_INPUTS: [InputDescriptor; 8] = [
 
 pub struct NES {
     config: Arc<Mutex<Config>>,
-    display: Vec<u8>,
     bus: Rc<RefCell<Box<dyn BusLike>>>,
     cpu: Rc<RefCell<NES6502>>,
     ppu: Rc<RefCell<PPU>>,
@@ -126,7 +125,6 @@ impl NES {
 
         NES {
             config: Arc::new(Mutex::new(NESConfig::new().entries)),
-            display,
             bus,
             cpu,
             ppu,
@@ -237,9 +235,8 @@ impl Backend for NES {
         }
     }
 
-    fn framebuffer_rgba(&mut self) -> &[u8] {
-        self.display.copy_from_slice(&self.ppu.borrow().get_screen());
-        &self.display
+    fn framebuffer_rgb(&mut self) -> Vec<u8> {
+        self.ppu.borrow().get_screen()
     }
 
     fn framebuffer_size(&self) -> (usize, usize) {
@@ -272,6 +269,7 @@ impl Backend for NES {
                 acc
             });
         self.tx.send(averaged).unwrap();
+        //out.append(&mut averaged);
     }
 
     fn input_map(&self) -> &[InputDescriptor] {

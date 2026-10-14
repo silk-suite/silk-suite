@@ -707,11 +707,11 @@ impl Backend for CHIP8 {
         }
     }
 
-    fn framebuffer_rgba(&mut self) -> &[u8] {
+    fn framebuffer_rgb(&mut self) -> Vec<u8> {
         if self.hires_mode {
-            &self.framebuffer
+            self.framebuffer.to_vec()
         } else {
-            &self.framebuffer[0..6144]
+            self.framebuffer[0..6144].to_vec()
         }
     }
 
