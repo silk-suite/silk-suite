@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::backends::chip8::CHIP8;
+use crate::backends::nes::NES;
 use crate::core::{AudioEngine, Backend, ConfigValue, InputEvent, InputKind};
 
 fn main() {
@@ -56,7 +57,7 @@ impl eframe::App for SilkSuite {
             let (w, h) = self.backend.framebuffer_size();
 
             let image =
-                egui::ColorImage::from_rgba_unmultiplied([w, h], self.backend.framebuffer_rgba());
+                egui::ColorImage::from_rgb([w, h], self.backend.framebuffer_rgba());
 
             let tex = self.screen_texture.get_or_insert_with(|| {
                 ui.ctx()
@@ -82,6 +83,11 @@ impl eframe::App for SilkSuite {
                         if CHIP8::file_extensions().contains(&extension.as_str()) {
                             let config = self.backend.config();
                             self.backend = Box::new(CHIP8::new());
+                            *self.backend.config().lock().unwrap() = config.lock().unwrap().clone();
+                        }
+                        if NES::file_extensions().contains(&extension.as_str()) {
+                            let config = self.backend.config();
+                            self.backend = Box::new(NES::new());
                             *self.backend.config().lock().unwrap() = config.lock().unwrap().clone();
                         }
 
@@ -113,7 +119,7 @@ impl eframe::App for SilkSuite {
         egui::CentralPanel::default().show(ui, |ui| {
             if let Some(tex) = &self.screen_texture {
                 let (w, h) = self.backend.framebuffer_size();
-                let scale = 10.0;
+                let scale = 2.0;
 
                 ui.centered_and_justified(|ui| {
                     ui.image((tex.id(), egui::vec2(w as f32 * scale, h as f32 * scale)));
@@ -138,56 +144,55 @@ impl eframe::App for SilkSuite {
                     CentralPanel::default().show(ctx, |ui| {
                         ui.vertical_centered(|ui| {
                             ui.add(Label::new(RichText::new("Config").size(24.0)));
-                            config.lock().expect("Lock poisoned!").iter_mut().for_each(|entry| {
-                                ui.horizontal(|ui| {
-                                    ui.add(Label::new(
-                                        RichText::new(entry.label.clone()).size(16.0),
-                                    ));
-                                    match &mut entry.value {
-                                        ConfigValue::Bool(value) => {
-                                            ui.checkbox(value, "Checked");
+                            config
+                                .lock()
+                                .expect("Lock poisoned!")
+                                .iter_mut()
+                                .for_each(|entry| {
+                                    ui.horizontal(|ui| {
+                                        ui.add(Label::new(
+                                            RichText::new(entry.label.clone()).size(16.0),
+                                        ));
+                                        match &mut entry.value {
+                                            ConfigValue::Bool(value) => {
+                                                ui.checkbox(value, "Checked");
+                                            }
+                                            ConfigValue::Integer {
+                                                raw: value,
+                                                range: (min, max),
+                                            } => {
+                                                ui.add(Slider::new(value, *min..=*max));
+                                            }
+                                            ConfigValue::Float {
+                                                raw: value,
+                                                range: (min, max),
+                                            } => {
+                                                ui.add(Slider::new(value, *min..=*max));
+                                            }
+                                            ConfigValue::Text(value) => {
+                                                ui.text_edit_singleline(value);
+                                            }
+                                            ConfigValue::Choice { selected, options } => {
+                                                let visual_selection =
+                                                    if *selected == 999 { 0 } else { *selected };
+                                                egui::ComboBox::from_label("Select one!")
+                                                    .selected_text(format!(
+                                                        "{:?}",
+                                                        options[visual_selection as usize]
+                                                    ))
+                                                    .show_ui(ui, |ui| {
+                                                        options.iter().enumerate().for_each(
+                                                            |(idx, option)| {
+                                                                ui.selectable_value(
+                                                                    selected, idx as u32, option,
+                                                                );
+                                                            },
+                                                        );
+                                                    });
+                                            }
                                         }
-                                        ConfigValue::Integer {
-                                            raw: value,
-                                            range: (min, max),
-                                        } => {
-                                            ui.add(Slider::new(value, *min..=*max));
-                                        }
-                                        ConfigValue::Float {
-                                            raw: value,
-                                            range: (min, max),
-                                        } => {
-                                            ui.add(Slider::new(value, *min..=*max));
-                                        }
-                                        ConfigValue::Text(value) => {
-                                            ui.text_edit_singleline(value);
-                                        }
-                                        ConfigValue::Choice {
-                                            selected,
-                                            options,
-                                        } => {
-                                            let visual_selection =
-                                                if *selected == 999 { 0 } else { *selected };
-                                            egui::ComboBox::from_label("Select one!")
-                                                .selected_text(format!(
-                                                    "{:?}",
-                                                    options[visual_selection as usize]
-                                                ))
-                                                .show_ui(ui, |ui| {
-                                                    options.iter().enumerate().for_each(
-                                                        |(idx, option)| {
-                                                            ui.selectable_value(
-                                                                selected,
-                                                                idx as u32,
-                                                                option,
-                                                            );
-                                                        },
-                                                    );
-                                                });
-                                        }
-                                    }
+                                    });
                                 });
-                            });
                         });
                     });
 

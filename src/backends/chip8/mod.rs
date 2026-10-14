@@ -50,8 +50,8 @@ pub struct CHIP8 {
     /// Current input state represented as u16 bitfield
     input: [bool; 16],
     hires_mode: bool,
-    /// Framebuffer (RGBA for emulator compatibility)
-    framebuffer: [u8; 128 * 64 * 4],
+    /// Framebuffer (RGB)
+    framebuffer: [u8; 128 * 64 * 3],
     /// Buffer for audio samples
     audio_buffer: Vec<f32>,
     /// Flag for execution to be paused, such as when waiting for inut in FX0A
@@ -65,10 +65,7 @@ impl CHIP8 {
         let mut quirks = Quirks::default();
         quirks.set_platform(platform.clone());
 
-        let mut framebuffer = [0; 128 * 64 * 4];
-        for px in framebuffer.chunks_exact_mut(4) {
-            px[3] = 255;
-        }
+        let framebuffer = [0; 128 * 64 * 3];
 
         Self {
             config: Arc::new(Mutex::new(CHIP8Config::new().entries)),
@@ -350,7 +347,7 @@ impl CHIP8 {
                     break; // clip horizontally
                 }
 
-                let idx = ((py * width + px) * 4) as usize;
+                let idx = ((py * width + px) * 3) as usize;
 
                 let pixel_on = self.framebuffer[idx] == 255;
 
@@ -361,13 +358,11 @@ impl CHIP8 {
                     self.framebuffer[idx] = 0;
                     self.framebuffer[idx + 1] = 0;
                     self.framebuffer[idx + 2] = 0;
-                    self.framebuffer[idx + 3] = 255;
                 } else {
                     // XOR ON
                     self.framebuffer[idx] = 255;
                     self.framebuffer[idx + 1] = 255;
                     self.framebuffer[idx + 2] = 255;
-                    self.framebuffer[idx + 3] = 255;
                 }
             }
         }
@@ -468,9 +463,6 @@ impl CHIP8 {
     // Helpers
     fn clear_framebuffer(&mut self) {
         self.framebuffer.fill(0);
-        for px in self.framebuffer.chunks_exact_mut(4) {
-            px[3] = 255;
-        }
     }
 
     fn load_font(&mut self) {
@@ -715,11 +707,11 @@ impl Backend for CHIP8 {
         }
     }
 
-    fn framebuffer_rgba(&self) -> &[u8] {
+    fn framebuffer_rgba(&mut self) -> &[u8] {
         if self.hires_mode {
             &self.framebuffer
         } else {
-            &self.framebuffer[0..8192]
+            &self.framebuffer[0..6144]
         }
     }
 
