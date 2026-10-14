@@ -55,10 +55,19 @@ impl AudioEngine {
             .default_output_device()
             .expect("no output device available");
 
-        let config = device
-            .default_output_config()
-            .expect("failed to get default output config")
-            .config();
+        let supported_config = device
+            .supported_output_configs()
+            .expect("failed to query output configurations")
+            .filter(|config| {
+                config.sample_format() == cpal::SampleFormat::F32
+            })
+            .find_map(|config| {
+                config.try_with_sample_rate(cpal::SAMPLE_RATE_48K)
+            })
+            .expect("device does not support 48 kHz f32 output");
+
+        let mut config = supported_config.config();
+        config.buffer_size = cpal::BufferSize::Fixed(1024);
 
         let queue: Arc<Mutex<VecDeque<f32>>> =
             Arc::new(Mutex::new(VecDeque::with_capacity(sample_rate as usize)));
@@ -69,6 +78,7 @@ impl AudioEngine {
 
         let err_fn = |err| eprintln!("audio stream error: {err}");
 
+        let mut last_sample = 0.0_f32;
         let stream = device
             .build_output_stream(
                 config,
@@ -76,8 +86,13 @@ impl AudioEngine {
                     let mut q = queue_cb.lock().unwrap();
 
                     for frame in data.chunks_mut(channels) {
-                        // mono source → duplicate into stereo if needed
-                        let sample = q.pop_front().unwrap_or(0.0);
+                        let sample = match q.pop_front() {
+                            Some(sample) => {
+                                last_sample = sample;
+                                sample
+                            }
+                            None => last_sample,
+                        };
 
                         for out in frame {
                             *out = sample;

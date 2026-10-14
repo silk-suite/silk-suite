@@ -34,7 +34,7 @@ impl SilkSuite {
         Self {
             backend: Box::new(CHIP8::new()),
             screen_texture: None,
-            audio: AudioEngine::new(44100),
+            audio: AudioEngine::new(48000),
             rom_loaded: false,
             show_config_window: Arc::new(AtomicBool::new(false)),
         }

@@ -1,5 +1,4 @@
 mod apu;
-mod apu_output;
 mod bus;
 mod cartridge;
 mod config;
@@ -10,7 +9,6 @@ mod mappers;
 
 
 use apu::APU;
-use apu_output::APUOutput;
 use bus::{Bus, BusLike};
 use cartridge::Cartridge;
 use cpu::NES6502;
@@ -18,14 +16,7 @@ use ppu::PPU;
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::{Arc, mpsc, Mutex};
-
-use rodio::{
-    source::Source,
-    DeviceSinkBuilder,
-    MixerDeviceSink,
-    Player,
-};
+use std::sync::{Arc, Mutex};
 
 use crate::backends::nes::config::NESConfig;
 use crate::core::{Backend, Config, InputDescriptor, InputEvent, InputKind};
@@ -49,10 +40,6 @@ pub struct NES {
     apu: Rc<RefCell<APU>>,
     cartridge: Option<Rc<RefCell<Cartridge>>>,
     rom_loaded: bool,
-
-    _audio_stream: MixerDeviceSink,
-    _audio_player: Player,
-    tx: mpsc::Sender<Vec<f32>>,
 }
 
 impl NES {
@@ -109,17 +96,6 @@ impl NES {
             apu_ref.connect_to_bus(Rc::clone(&bus_ref));
         }
 
-        // Set up audio
-        let (tx, rx) = mpsc::channel();
-
-        let audio_stream = DeviceSinkBuilder::open_default_sink()
-            .expect("Failed to open audio output");
-
-        let audio_player = Player::connect_new(audio_stream.mixer());
-
-        let source = APUOutput::new(rx).amplify(0.25);
-        audio_player.append(source);
-
         let mut display = Vec::new();
         display.resize(184320, 0);
 
@@ -131,9 +107,6 @@ impl NES {
             apu,
             cartridge: None,
             rom_loaded: false,
-            tx,
-            _audio_stream: audio_stream,
-            _audio_player: audio_player,
         }
     }
 }
@@ -259,17 +232,15 @@ impl Backend for NES {
     }
 
     fn flush_audio_samples(&mut self, out: &mut Vec<f32>) {
-        // Update audio
         let buffer = std::mem::take(&mut self.apu.borrow_mut().output_buffer);
-        let averaged = buffer
+        let mut averaged = buffer
             .chunks(112)
             .fold(Vec::new(), |mut acc, x| {
                 let sum: f32 = x.iter().sum();
                 acc.push(sum / x.len() as f32);
                 acc
             });
-        self.tx.send(averaged).unwrap();
-        //out.append(&mut averaged);
+        out.append(&mut averaged);
     }
 
     fn input_map(&self) -> &[InputDescriptor] {
