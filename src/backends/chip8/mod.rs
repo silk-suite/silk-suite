@@ -679,16 +679,6 @@ impl Backend for CHIP8 {
         memory_slice.copy_from_slice(data);
     }
 
-    fn reset_rom(&mut self) {
-        self.v.fill(0);
-        self.i = 0x200;
-        self.delay_timer = 0;
-        self.sound_timer = 0;
-        self.input.fill(false);
-        self.clear_framebuffer();
-        self.pc = 0x200;
-    }
-
     fn frame_tick(&mut self) {
         if !self.halted {
             self.delay_timer = self.delay_timer.saturating_sub(1);

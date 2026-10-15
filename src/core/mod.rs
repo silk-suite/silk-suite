@@ -29,7 +29,6 @@ pub enum InputEvent {
 pub trait Backend {
     fn reset(&mut self);
     fn load_rom(&mut self, data: &[u8]);
-    fn reset_rom(&mut self);
     fn frame_tick(&mut self);
     fn framebuffer_rgb(&mut self) -> Vec<u8>;
     fn framebuffer_size(&self) -> (usize, usize);

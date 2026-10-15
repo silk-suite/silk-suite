@@ -100,10 +100,6 @@ impl eframe::App for SilkSuite {
                     }
                 }
 
-                if ui.button("Reset ROM").clicked() {
-                    self.backend.reset_rom();
-                }
-
                 if ui.button("Quit").clicked() {
                     ui.send_viewport_cmd(egui::ViewportCommand::Close);
                 }

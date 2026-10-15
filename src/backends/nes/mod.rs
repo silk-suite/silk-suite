@@ -134,10 +134,6 @@ impl Backend for NES {
         self.ppu.borrow_mut().reset();
     }
 
-    fn reset_rom(&mut self) {
-        todo!()
-    }
-
     fn frame_tick(&mut self) {
         if !self.rom_loaded {
             return;
