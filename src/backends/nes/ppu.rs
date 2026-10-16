@@ -211,7 +211,7 @@ pub struct OAMSprite {
 }
 
 pub struct PPU {
-  screen: [u8; 256 * 240 * 3],
+  screen: Vec<u8>,
   pub nametables: [[u8; 0x400]; 2],
   palette: [u8; 32],
   pattern: [[u8; 0x1000]; 2],
@@ -247,7 +247,7 @@ pub struct PPU {
 impl PPU {
   pub fn new() -> Self {
     Self {
-      screen: [0; 256 * 240 * 3],
+      screen: vec![0; 256 * 240 * 3],
       nametables: [[0; 0x400]; 2],
       palette: [0; 32],
       pattern: [[0; 0x1000]; 2],
@@ -882,8 +882,8 @@ impl PPU {
     Vec::from(self.palette)
   }
 
-  pub fn get_screen(&self) -> Vec<u8> {
-    Vec::from(self.screen)
+  pub fn get_screen(&self) -> &[u8] {
+    &self.screen
   }
 
   pub fn reset(&mut self) {

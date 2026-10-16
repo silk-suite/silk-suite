@@ -166,7 +166,7 @@ impl Backend for NES {
     }
 
     fn framebuffer_rgb(&mut self) -> Vec<u8> {
-        self.bus.ppu.get_screen()
+        Vec::from(self.bus.ppu.get_screen())
     }
 
     fn framebuffer_size(&self) -> (usize, usize) {
