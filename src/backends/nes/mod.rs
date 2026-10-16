@@ -6,6 +6,8 @@ mod cpu;
 mod ppu;
 mod mapper;
 mod mappers;
+#[cfg(test)]
+mod tests;
 
 
 use apu::APU;
@@ -14,8 +16,6 @@ use cartridge::Cartridge;
 use cpu::NES6502;
 use ppu::PPU;
 
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use crate::backends::nes::config::NESConfig;
@@ -34,78 +34,23 @@ const NES_INPUTS: [InputDescriptor; 8] = [
 
 pub struct NES {
     config: Arc<Mutex<Config>>,
-    bus: Rc<RefCell<Box<dyn BusLike>>>,
-    cpu: Rc<RefCell<NES6502>>,
-    ppu: Rc<RefCell<PPU>>,
-    apu: Rc<RefCell<APU>>,
-    cartridge: Option<Rc<RefCell<Cartridge>>>,
+    bus: Bus,
+    cpu: NES6502,
     rom_loaded: bool,
 }
 
 impl NES {
     pub fn new() -> Self {
-        // Create bus
-        let bus = Rc::new(RefCell::new(Box::new(Bus::new()) as Box<dyn BusLike>));
-
-        // Create CPU
-        let cpu = Rc::new(RefCell::new(NES6502::new()));
-
-        let ppu = Rc::new(RefCell::new(PPU::new()));
-
-        let apu = Rc::new(RefCell::new(APU::new()));
-
-        // Connect bus to CPU
-        {
-            let mut bus_ref = bus.borrow_mut();
-            let cpu_ref = Rc::clone(&cpu);
-            bus_ref.connect_cpu(Rc::clone(&cpu_ref));
-        }
-
-        // Connect CPU to bus
-        {
-            let mut cpu_ref = cpu.borrow_mut();
-            let bus_ref = Rc::clone(&bus);
-            cpu_ref.connect_to_bus(Rc::clone(&bus_ref));
-        }
-
-        // Connect bus to PPU
-        {
-            let mut bus_ref = bus.borrow_mut();
-            let ppu_ref = Rc::clone(&ppu);
-            bus_ref.connect_ppu(Rc::clone(&ppu_ref));
-        }
-
-        // Connect PPU to bus
-        {
-            let mut ppu_ref = ppu.borrow_mut();
-            let bus_ref = Rc::clone(&bus);
-            ppu_ref.connect_to_bus(Rc::clone(&bus_ref));
-        }
-
-        // Connect bus to APU
-        {
-            let mut bus_ref = bus.borrow_mut();
-            let apu_ref = Rc::clone(&apu);
-            bus_ref.connect_apu(Rc::clone(&apu_ref));
-        }
-
-        // Connect APU to bus
-        {
-            let mut apu_ref = apu.borrow_mut();
-            let bus_ref = Rc::clone(&bus);
-            apu_ref.connect_to_bus(Rc::clone(&bus_ref));
-        }
+        let bus = Bus::new();
+        let cpu = NES6502::new();
 
         let mut display = Vec::new();
-        display.resize(184320, 0);
+        display.resize(256 * 240 * 3, 0);
 
         NES {
             config: Arc::new(Mutex::new(NESConfig::new().entries)),
             bus,
             cpu,
-            ppu,
-            apu,
-            cartridge: None,
             rom_loaded: false,
         }
     }
@@ -116,22 +61,16 @@ impl Backend for NES {
         if !self.rom_loaded {
             return;
         }
-        self.cpu.borrow_mut().reset();
-        self.ppu.borrow_mut().reset();
+        self.cpu.reset(&mut self.bus);
+        self.bus.reset();
     }
 
     fn load_rom(&mut self, data: &[u8]) {
-        let cartridge = Rc::new(RefCell::new(Cartridge::from_bytes(data.to_vec())));
-        {
-            let mut bus_ref = self.bus.borrow_mut();
-            let cartridge_ref = Rc::clone(&cartridge);
-            bus_ref.insert_cartridge(Rc::clone(&cartridge_ref));
-        }
-        self.cartridge = Some(cartridge);
+        let cartridge = Cartridge::from_bytes(data.to_vec());
+        self.bus.cartridge = Some(cartridge);
         self.rom_loaded = true;
 
-        self.cpu.borrow_mut().reset();
-        self.ppu.borrow_mut().reset();
+        self.reset();
     }
 
     fn frame_tick(&mut self) {
@@ -143,31 +82,33 @@ impl Backend for NES {
         // but the borrow checker is screwing me here so this is fine for now
         for _ in 0..(341*262) {
             // Grab some variables from the bus to use while stepping
-            let cycles = self.bus.borrow().get_global_cycles();
-            let dma_running = self.bus.borrow().dma_running();
+            let cycles = self.bus.get_global_cycles();
+            let dma_running = self.bus.dma_running();
             let mut should_run_dma = false;
 
-            self.ppu.borrow_mut().step();
+            if self.bus.ppu.step(&mut self.bus.cartridge) { // Returns true if we should scanline
+                self.bus.scanline();
+            }
             if cycles % 3 == 0 {
-                if self.bus.borrow().dma_queued() && !dma_running {
+                if self.bus.dma_queued() && !dma_running {
                     if cycles % 2 == 1 {
                         should_run_dma = true;
                     }
                 } else if dma_running {
                     if cycles % 2 == 0 {
                         let dma_data = {
-                            let bus = self.bus.borrow();
+                            let bus = &mut self.bus;
                             let dma_page = bus.dma_page() as u16;
                             let dma_address = bus.dma_address() as u16;
                             let dma_data = bus.cpu_read((dma_page << 8) | dma_address);
                             dma_data
                         };
-                        self.bus.borrow_mut().set_dma_data(dma_data);
+                        self.bus.set_dma_data(dma_data);
                     } else {
-                        let mut dma_address = self.bus.borrow().dma_address();
-                        let dma_data = self.bus.borrow().dma_data();
+                        let mut dma_address = self.bus.dma_address();
+                        let dma_data = self.bus.dma_data();
                         let oam_index = (dma_address / 4) as usize;
-                        let mut ppu = self.ppu.borrow_mut();
+                        let ppu = &mut self.bus.ppu;
                         match dma_address % 4 {
                             0 => ppu.oam[oam_index].y = dma_data,
                             1 => ppu.oam[oam_index].id = dma_data,
@@ -176,36 +117,56 @@ impl Backend for NES {
                             _ => (),
                         }
                         dma_address = dma_address.wrapping_add(1);
-                        self.bus.borrow_mut().set_dma_address(dma_address);
+                        self.bus.set_dma_address(dma_address);
 
                         if dma_address == 0 {
-                            self.bus.borrow_mut().set_dma_running(false);
-                            self.bus.borrow_mut().set_dma_queued(false);
+                            self.bus.set_dma_running(false);
+                            self.bus.set_dma_queued(false);
                         }
                     }
                 } else {
-                    self.cpu.borrow_mut().step();
-                    self.apu.borrow_mut().step(self.cpu.borrow().total_cycles);
-                    if self.apu.borrow().registers.status.dmc_interrupt || self.apu.borrow().registers.status.frame_interrupt || self.cartridge.as_ref().unwrap().borrow().mapper.irq_state() {
-                        self.cpu.borrow_mut().irq();
+                    self.cpu.step(&mut self.bus);
+                    self.bus.apu.step(self.cpu.total_cycles);
+
+                    // DMC MEMORY READER
+                    // Don't love doing this here but will fix it later
+                    if self.bus.apu.registers.dmc.sample_buffer == 0 && self.bus.apu.registers.dmc.bytes_remaining > 0 {
+                    self.bus.apu.registers.dmc.sample_buffer = self.bus.cpu_read(self.bus.apu.registers.dmc.sample_address);
+                    self.bus.apu.registers.dmc.memory_reader_address = match self.bus.apu.registers.dmc.memory_reader_address.overflowing_add(1) {
+                        (_, true) => 0x8000,
+                        (address, false) => address,
+                    };
+                    self.bus.apu.registers.dmc.bytes_remaining -= 1;
+                    if self.bus.apu.registers.dmc.bytes_remaining == 0 {
+                        if self.bus.apu.registers.dmc.loop_sample {
+                            self.bus.apu.registers.dmc.reset();
+                            } else if self.bus.apu.registers.dmc.irq_enable {
+                            self.bus.apu.registers.status.dmc_interrupt = true;
+                            }
+                        }
+                    }
+                    self.bus.apu.registers.dmc.tick_output_unit();
+
+                    if self.bus.apu.registers.status.dmc_interrupt || self.bus.apu.registers.status.frame_interrupt || self.bus.cartridge.as_mut().unwrap().mapper.irq_state() {
+                        self.cpu.irq(&mut self.bus);
                     }
                 }
             }
-            let nmi = self.ppu.borrow().nmi;
+            let nmi = self.bus.ppu.nmi;
             if nmi {
-                self.ppu.borrow_mut().nmi = false;
-                self.cpu.borrow_mut().nmi();
+                self.bus.ppu.nmi = false;
+                self.cpu.nmi(&mut self.bus);
             }
-            self.bus.borrow_mut().set_global_cycles(cycles + 1);
+            self.bus.set_global_cycles(cycles + 1);
             if should_run_dma {
-                self.bus.borrow_mut().set_dma_running(true);
+                self.bus.set_dma_running(true);
             }
-            self.apu.borrow_mut().update_output();
+            self.bus.apu.update_output();
         }
     }
 
     fn framebuffer_rgb(&mut self) -> Vec<u8> {
-        self.ppu.borrow().get_screen()
+        self.bus.ppu.get_screen()
     }
 
     fn framebuffer_size(&self) -> (usize, usize) {
@@ -224,11 +185,11 @@ impl Backend for NES {
                 },
             }
         }
-        self.bus.borrow_mut().update_controller(0, controller_state as u8);
+        self.bus.update_controller(0, controller_state as u8);
     }
 
     fn flush_audio_samples(&mut self, out: &mut Vec<f32>) {
-        let buffer = std::mem::take(&mut self.apu.borrow_mut().output_buffer);
+        let buffer = std::mem::take(&mut self.bus.apu.output_buffer);
         let mut averaged = buffer
             .chunks(112)
             .fold(Vec::new(), |mut acc, x| {

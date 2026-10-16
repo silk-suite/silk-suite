@@ -1,8 +1,3 @@
-use std::rc::Rc;
-use std::cell::RefCell;
-
-use crate::backends::nes::bus::BusLike;
-
 const LC_LOOKUP: [u8; 32] = [
   10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14,
   12, 16, 24, 18, 48, 20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30
@@ -112,7 +107,7 @@ impl Pulse {
     if self.sweep_negate {
       self.target_period = self.timer_period.saturating_sub(change_amount);
       if self.channel1 {
-        self.target_period -= 1;
+        self.target_period = self.target_period.saturating_sub(1);
       }
     } else {
       self.target_period = self.timer_period.wrapping_add(change_amount);
@@ -274,16 +269,16 @@ const DMC_RATES: [u16; 16] = [
 
 #[derive(Clone)]
 pub struct DMC {
-  irq_enable: bool,
-  loop_sample: bool,
+  pub irq_enable: bool,
+  pub loop_sample: bool,
   rate: u16,
   output: u8,
-  sample_address: u16,
+  pub sample_address: u16,
   sample_length: u16,
   // Memory reader
-  memory_reader_address: u16,
-  bytes_remaining: u16,
-  sample_buffer: u8,
+  pub memory_reader_address: u16,
+  pub bytes_remaining: u16,
+  pub sample_buffer: u8,
   // Ouput unit
   output_unit_timer: u16,
   shift_register: u8,
@@ -356,6 +351,7 @@ pub struct APUStatus {
 }
 
 impl APUStatus {
+  #[allow(unused)]
   pub fn to_u8(&self) -> u8 {
     (self.dmc_interrupt as u8) << 7 |
     (self.frame_interrupt as u8) << 6 |
@@ -366,6 +362,7 @@ impl APUStatus {
     (self.pulse_1_active as u8) << 1
   }
 
+  #[allow(unused)]
   pub fn set_from_u8(&mut self, byte: u8) {
     self.dmc_interrupt = (byte & (1 << 7)) != 0;
     self.frame_interrupt = (byte & (1 << 6)) != 0;
@@ -389,7 +386,7 @@ pub struct APURegisters {
   pulse_2: Pulse,
   triangle: Triangle,
   noise: Noise,
-  dmc: DMC,
+  pub dmc: DMC,
   pub status: APUStatus,
   frame_counter: APUFrameCounter,
 }
@@ -409,7 +406,6 @@ impl Default for APURegisters {
 }
 
 pub struct APU {
-  bus: Option<Rc<RefCell<Box<dyn BusLike>>>>,
   pub registers: APURegisters,
   pub total_cycles: u32,
   pub irq_pending: bool,
@@ -419,31 +415,10 @@ pub struct APU {
 impl APU {
   pub fn new() -> Self {
     Self {
-      bus: None,
       registers: APURegisters::default(),
       total_cycles: 0,
       irq_pending: false,
       output_buffer: Vec::new(),
-    }
-  }
-
-  pub fn connect_to_bus(&mut self, bus: Rc<RefCell<Box<dyn BusLike>>>) {
-    self.bus = Some(bus.clone());
-  }
-
-  pub fn read(&self, address: u16) -> u8 {
-    if let Some(bus) = &self.bus {
-      bus.borrow().cpu_read(address)
-    } else {
-      panic!("Tried to read from bus before it was connected!");
-    }
-  }
-
-  pub fn write(&mut self, address: u16, value: u8) {
-    if let Some(bus) = &self.bus {
-      bus.borrow_mut().cpu_write(address, value);
-    } else {
-      panic!("Tried to write to bus before it was connected!");
     }
   }
 
@@ -474,24 +449,6 @@ impl APU {
     self.registers.pulse_2.update_target_period();
     self.registers.triangle.tick_sequencer();
     self.registers.noise.tick_shift_register();
-    // Don't love doing this here but will fix it later
-    // DMC MEMORY READER
-    if self.registers.dmc.sample_buffer == 0 && self.registers.dmc.bytes_remaining > 0 {
-      self.registers.dmc.sample_buffer = self.read(self.registers.dmc.sample_address);
-      self.registers.dmc.memory_reader_address = match self.registers.dmc.memory_reader_address.overflowing_add(1) {
-        (_, true) => 0x8000,
-        (address, false) => address,
-      };
-      self.registers.dmc.bytes_remaining -= 1;
-      if self.registers.dmc.bytes_remaining == 0 {
-        if self.registers.dmc.loop_sample {
-          self.registers.dmc.reset();
-        } else if self.registers.dmc.irq_enable {
-          self.registers.status.dmc_interrupt = true;
-        }
-      }
-    }
-    self.registers.dmc.tick_output_unit();
 
     if cpu_cycles % 2 == 0 {
       self.registers.pulse_1.tick_sequencer();

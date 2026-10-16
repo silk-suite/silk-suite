@@ -1,9 +1,4 @@
-use crate::backends::nes::bus::BusLike;
 use crate::backends::nes::cartridge::{Cartridge, MirroringMode};
-
-use std::borrow::BorrowMut;
-use std::rc::Rc;
-use std::cell::RefCell;
 
 // region: PPU Registers
 
@@ -24,6 +19,7 @@ pub struct PPUCTRL {
 }
 
 impl PPUCTRL {
+  #[allow(unused)]
   pub fn to_u8(&self) -> u8 {
     (self.nametable_x as u8) << 0 |
     (self.nametable_y as u8) << 1 |
@@ -60,6 +56,7 @@ pub struct PPUMASK {
 }
 
 impl PPUMASK {
+  #[allow(unused)]
   pub fn to_u8(&self) -> u8 {
     (self.greyscale as u8) << 0 |
     (self.background_left_column_enable as u8) << 1 |
@@ -97,6 +94,7 @@ impl PPUSTATUS {
     (self.vertical_blank as u8) << 7
   }
 
+  #[allow(unused)]
   pub fn set_from_u8(&mut self, byte: u8) {
     self.sprite_overflow = (byte & (1 << 5)) != 0;
     self.sprite_zero_hit = (byte & (1 << 6)) != 0;
@@ -161,6 +159,7 @@ pub struct PPUInternal {
 }
 
 #[derive(Debug, Default, Clone, Copy)]
+#[allow(unused)]
 pub struct PPURegisters {
   pub ctrl: PPUCTRL,
   pub mask: PPUMASK,
@@ -212,8 +211,6 @@ pub struct OAMSprite {
 }
 
 pub struct PPU {
-  bus: Option<Rc<RefCell<Box<dyn BusLike>>>>,
-  cartridge: Option<Rc<RefCell<Cartridge>>>,
   screen: [u8; 256 * 240 * 3],
   pub nametables: [[u8; 0x400]; 2],
   palette: [u8; 32],
@@ -250,8 +247,6 @@ pub struct PPU {
 impl PPU {
   pub fn new() -> Self {
     Self {
-      bus: None,
-      cartridge: None,
       screen: [0; 256 * 240 * 3],
       nametables: [[0; 0x400]; 2],
       palette: [0; 32],
@@ -283,16 +278,8 @@ impl PPU {
     }
   }
 
-  pub fn connect_to_bus(&mut self, bus: Rc<RefCell<Box<dyn BusLike>>>) {
-    self.bus = Some(bus);
-  }
-
-  pub fn connect_cartridge(&mut self, cartridge: Rc<RefCell<Cartridge>>) {
-    self.cartridge = Some(cartridge);
-  }
-
   // CPU is reading from PPU
-  pub fn cpu_read(&mut self, address: u16) -> u8 {
+  pub fn cpu_read(&mut self, cartridge: &mut Option<Cartridge>, address: u16) -> u8 {
     match address {
       0x0000 => 0, // CTRL (not readable)
       0x0001 => 0, // MASK (not readable)
@@ -319,7 +306,7 @@ impl PPU {
       0x0006 => 0, // ADDR (not readable)
       0x0007 => { // DATA
         let mut data = self.buffered_data;
-        self.buffered_data = *self.ppu_read(self.registers.internal.v.address);
+        self.buffered_data = *self.ppu_read(cartridge, self.registers.internal.v.address);
 
         // Reads from palette memory are not buffered
         if self.registers.internal.v.address >= 0x3F00 {
@@ -336,7 +323,7 @@ impl PPU {
   }
 
   // CPU is writing to PPU
-  pub fn cpu_write(&mut self, address: u16, value: u8) {
+  pub fn cpu_write(&mut self, cartridge: &mut Option<Cartridge>, address: u16, value: u8) {
     match address {
       0x0000 => { // CTRL
         self.registers.ctrl.set_from_u8(value);
@@ -385,7 +372,7 @@ impl PPU {
         }
       },
       0x0007 => { // DATA
-        self.ppu_write(self.registers.internal.v.address, value);
+        self.ppu_write(cartridge, self.registers.internal.v.address, value);
         let increment = if self.registers.ctrl.increment_mode { 32 } else { 1 };
         self.registers.internal.v.set_address(self.registers.internal.v.address.wrapping_add(increment));
       },
@@ -394,12 +381,10 @@ impl PPU {
   }
 
   // PPU is reading from PPU bus
-  pub fn ppu_read(&mut self, address: u16) -> &u8 {
+  pub fn ppu_read(&mut self, cartridge: &mut Option<Cartridge>, address: u16) -> &u8 {
     let mut masked = address & 0x3FFF;
     if masked <= 0x1FFF {
-      let cartridge = if let Some(cartridge) = &self.cartridge {
-        cartridge.borrow()
-      } else {
+      let Some(cartridge) = cartridge else {
         panic!("Cartridge is not attached to PPU!");
       };
       if cartridge.header_info.chr_rom_size > 0 {
@@ -412,9 +397,7 @@ impl PPU {
       //println!("PPU READ from address {:#04X} at scanline {} cycle {}", masked, self.scanline_count, self.cycle_count);
       // Nametables
       masked = address & 0x0FFF;
-      let cartridge = if let Some(cartridge) = &self.cartridge {
-        cartridge.borrow()
-      } else {
+      let Some(cartridge) = cartridge else {
         panic!("Cartridge is not attached to PPU!");
       };
       match cartridge.get_nametable_layout() {
@@ -460,11 +443,9 @@ impl PPU {
   }
 
   // PPU is writing to PPU bus
-  pub fn ppu_write(&mut self, address: u16, value: u8) {
+  pub fn ppu_write(&mut self, cartridge: &mut Option<Cartridge>, address: u16, value: u8) {
     let mut masked = (address & 0x3FFF) as usize;
-    let cartridge = if let Some(cartridge) = &self.cartridge {
-      cartridge.borrow()
-    } else {
+    let Some(cartridge) = cartridge else {
       panic!("Cartridge is not attached to PPU!");
     };
 
@@ -514,7 +495,7 @@ impl PPU {
   }
 
   /// Step the clock of the PPU
-  pub fn step(&mut self) {
+  pub fn step(&mut self, cartridge: &mut Option<Cartridge>) -> bool {
     if self.scanline_count >= -1 && self.scanline_count < 240 {
       if self.scanline_count == 0 && self.cycle_count == 0 {
         self.cycle_count = 1;
@@ -566,10 +547,10 @@ impl PPU {
             self.bg_attrib_shift_low = (self.bg_attrib_shift_low & 0xFF00) | if (self.bg_next_tile_attrib & 0b01) != 0 { 0xFF } else { 0 };
             self.bg_attrib_shift_high = (self.bg_attrib_shift_high & 0xFF00) | if (self.bg_next_tile_attrib & 0b10) != 0 { 0xFF } else { 0 };
 
-            self.bg_next_tile_id = *self.ppu_read(0x2000 | (self.registers.internal.v.address & 0x0FFF));
+            self.bg_next_tile_id = *self.ppu_read(cartridge, 0x2000 | (self.registers.internal.v.address & 0x0FFF));
           },
           2 => {
-            self.bg_next_tile_attrib = *self.ppu_read(0x23C0 | ((self.registers.internal.v.nametable_y as u16) << 11)
+            self.bg_next_tile_attrib = *self.ppu_read(cartridge, 0x23C0 | ((self.registers.internal.v.nametable_y as u16) << 11)
               | ((self.registers.internal.v.nametable_x as u16) << 10)
               | ((self.registers.internal.v.coarse_y as u16 >> 2) << 3)
               | (self.registers.internal.v.coarse_x as u16 >> 2));
@@ -584,12 +565,12 @@ impl PPU {
             self.bg_next_tile_attrib &= 0x03;
           },
           4 => {
-            self.bg_next_tile_lsb = *self.ppu_read(((self.registers.ctrl.background_tile_select as u16) << 12)
+            self.bg_next_tile_lsb = *self.ppu_read(cartridge, ((self.registers.ctrl.background_tile_select as u16) << 12)
               + ((self.bg_next_tile_id as u16) << 4)
               + self.registers.internal.v.fine_y as u16);
           },
           6 => {
-            self.bg_next_tile_msb = *self.ppu_read(((self.registers.ctrl.background_tile_select as u16) << 12)
+            self.bg_next_tile_msb = *self.ppu_read(cartridge, ((self.registers.ctrl.background_tile_select as u16) << 12)
               + ((self.bg_next_tile_id as u16) << 4)
               + self.registers.internal.v.fine_y as u16 + 8);
           },
@@ -644,7 +625,7 @@ impl PPU {
       }
 
       if self.cycle_count == 338 || self.cycle_count == 340 {
-        self.bg_next_tile_id = *self.ppu_read(0x2000 | (self.registers.internal.v.address & 0x0FFF));
+        self.bg_next_tile_id = *self.ppu_read(cartridge, 0x2000 | (self.registers.internal.v.address & 0x0FFF));
       }
 
       if self.scanline_count == -1 && self.cycle_count >= 280 && self.cycle_count < 305 {
@@ -732,8 +713,8 @@ impl PPU {
 
           sprite_pattern_address_high = sprite_pattern_address_low + 8;
 
-          sprite_pattern_bits_low = *self.ppu_read(sprite_pattern_address_low);
-          sprite_pattern_bits_high = *self.ppu_read(sprite_pattern_address_high);
+          sprite_pattern_bits_low = *self.ppu_read(cartridge, sprite_pattern_address_low);
+          sprite_pattern_bits_high = *self.ppu_read(cartridge, sprite_pattern_address_high);
 
           if self.active_sprites[i].attributes.flip_horizontally {
             sprite_pattern_bits_low = sprite_pattern_bits_low.reverse_bits();
@@ -845,13 +826,14 @@ impl PPU {
     if self.scanline_count < 240 && self.cycle_count < 256 {
       let index = (self.scanline_count as usize).wrapping_mul(256) + (self.cycle_count.saturating_sub(1) as usize);
       if index < self.screen.len() {
-        let palette_index = (self.ppu_read(0x3F00 + (pal as u16 * 4) + pixel as u16) & 0x3F) as usize;
+        let palette_index = (self.ppu_read(cartridge, 0x3F00 + (pal as u16 * 4) + pixel as u16) & 0x3F) as usize;
         self.screen[index * 3] = COLORS[palette_index][0];
         self.screen[index * 3 + 1] = COLORS[palette_index][1];
         self.screen[index * 3 + 2] = COLORS[palette_index][2];
       }
     }
 
+    let mut scanline = false;
     self.cycle_count += 1;
     if self.cycle_count >= 341 {
       self.cycle_count = 0;
@@ -860,11 +842,14 @@ impl PPU {
         self.scanline_count = -1;
         self.frame_complete = true;
       }
-      self.bus.as_ref().unwrap().as_ref().borrow_mut().scanline();
+      scanline = true;
     }
+
+    scanline
   }
 
-  pub fn get_pattern_table(&mut self, index: u8) -> Vec<u8> {
+  #[allow(unused)]
+  pub fn get_pattern_table(&mut self, cartridge: &mut Option<Cartridge>, index: u8) -> Vec<u8> {
     let mut vec: Vec<u8> = Vec::new();
     vec.resize(0x4000, 0);
 
@@ -873,8 +858,8 @@ impl PPU {
         let offset: u16 = tile_y * 256 + tile_x * 16;
 
         for row in 0..8 {
-          let mut tile_lsb = *self.ppu_read((index as u16 * 0x1000 + offset + row) as u16);
-          let mut tile_msb = *self.ppu_read((index as u16 * 0x1000 + offset + row + 8) as u16);
+          let mut tile_lsb = *self.ppu_read(cartridge, (index as u16 * 0x1000 + offset + row) as u16);
+          let mut tile_msb = *self.ppu_read(cartridge, (index as u16 * 0x1000 + offset + row + 8) as u16);
           for col in 0..8 {
             let pixel = (tile_lsb & 0x01) + (tile_msb & 0x01);
             tile_lsb >>= 1;
@@ -892,6 +877,7 @@ impl PPU {
     vec
   }
 
+  #[allow(unused)]
   pub fn get_palettes(&self) -> Vec<u8> {
     Vec::from(self.palette)
   }
