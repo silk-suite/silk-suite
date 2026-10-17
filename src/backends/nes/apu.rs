@@ -629,10 +629,10 @@ impl APU {
         self.registers.dmc.output = value & 0b0111_1111;
       },
       0x4012 => {
-        self.registers.dmc.sample_address = 0xC000 + (value * 64) as u16;
+        self.registers.dmc.sample_address = 0xC000 + value.saturating_mul(64) as u16;
       },
       0x4013 => {
-        self.registers.dmc.sample_length = (value * 16) as u16 + 1;
+        self.registers.dmc.sample_length = value.saturating_mul(16) as u16 + 1;
       },
       // Status
       0x4015 => {
